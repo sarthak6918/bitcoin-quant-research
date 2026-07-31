@@ -1,0 +1,123 @@
+BTC REGIME HMM — MODEL REPORT
+======================================================================
+Data: 2017-08-17 → 2026-07-22  (3262 raw daily bars)
+Features used: ['feat_logret', 'feat_vol', 'feat_adx']
+Train: 2017-08-31 → 2024-10-10 (2598 rows)
+Test : 2024-10-11 → 2026-07-22 (650 rows)
+
+Model comparison across K:
+ K  train_loglik  test_loglik  n_params           BIC           AIC
+ 2   5039.556580  1719.889566        15  -9961.175702 -10049.113160
+ 3   5899.184646  2010.702896        26 -11593.944364 -11746.369291
+ 4   6647.857500  2083.860459        39 -12989.077609 -13217.715000
+ 5   7115.415067  2166.990904        54 -13806.255286 -14122.830135
+
+Selected K = 5 (lowest BIC; best held-out LL was K=5)
+
+======================================================================
+MODEL REPORT — K=2
+======================================================================
+
+Per-state emission parameters (mean, std) per feature:
+  State 0 [bull_high-vol]:  feat_logret=0.00246, feat_vol=0.04350, feat_adx=37.99575  |  feat_logret_std=0.02772, feat_vol_std=0.02020, feat_adx_std=10.83622
+  State 1 [bear_low-vol]:  feat_logret=-0.00022, feat_vol=0.02553, feat_adx=22.32910  |  feat_logret_std=0.01491, feat_vol_std=0.00945, feat_adx_std=5.39445
+
+Transition matrix (rows = from-state, cols = to-state):
+        S0  S1
+  S0 [   bull_high-vol]:  0.974  0.026
+  S1 [    bear_low-vol]:  0.021  0.979
+
+Expected state duration (1 / (1 - p_ii)), in bars (days):
+  State 0 [bull_high-vol]: 38.0 days  (self-transition p=0.974)
+  State 1 [bear_low-vol]: 46.9 days  (self-transition p=0.979)
+
+Stationary distribution (long-run % of time in each state):
+  State 0 [bull_high-vol]: 44.7%
+  State 1 [bear_low-vol]: 55.3%
+
+======================================================================
+MODEL REPORT — K=3
+======================================================================
+
+Per-state emission parameters (mean, std) per feature:
+  State 0 [bear_low-vol]:  feat_logret=0.00045, feat_vol=0.01880, feat_adx=21.32822  |  feat_logret_std=0.01080, feat_vol_std=0.00655, feat_adx_std=6.29755
+  State 1 [bull_high-vol]:  feat_logret=0.00195, feat_vol=0.04429, feat_adx=41.38217  |  feat_logret_std=0.02768, feat_vol_std=0.02246, feat_adx_std=9.75124
+  State 2 [flat_low-vol]:  feat_logret=0.00054, feat_vol=0.03595, feat_adx=24.70121  |  feat_logret_std=0.02227, feat_vol_std=0.00827, feat_adx_std=4.88935
+
+Transition matrix (rows = from-state, cols = to-state):
+        S0  S1  S2
+  S0 [    bear_low-vol]:  0.962  0.008  0.030
+  S1 [   bull_high-vol]:  0.006  0.966  0.028
+  S2 [    flat_low-vol]:  0.026  0.026  0.948
+
+Expected state duration (1 / (1 - p_ii)), in bars (days):
+  State 0 [bear_low-vol]: 26.4 days  (self-transition p=0.962)
+  State 1 [bull_high-vol]: 29.5 days  (self-transition p=0.966)
+  State 2 [flat_low-vol]: 19.2 days  (self-transition p=0.948)
+
+Stationary distribution (long-run % of time in each state):
+  State 0 [bear_low-vol]: 29.8%
+  State 1 [bull_high-vol]: 34.6%
+  State 2 [flat_low-vol]: 35.6%
+
+======================================================================
+MODEL REPORT — K=4
+======================================================================
+
+Per-state emission parameters (mean, std) per feature:
+  State 0 [bull_low-vol]:  feat_logret=0.00047, feat_vol=0.01854, feat_adx=19.40933  |  feat_logret_std=0.01096, feat_vol_std=0.00692, feat_adx_std=4.48357
+  State 1 [bull_low-vol]:  feat_logret=0.00469, feat_vol=0.02917, feat_adx=41.43355  |  feat_logret_std=0.01679, feat_vol_std=0.00922, feat_adx_std=8.32799
+  State 2 [bear_high-vol]:  feat_logret=-0.00333, feat_vol=0.06339, feat_adx=36.68088  |  feat_logret_std=0.03706, feat_vol_std=0.02141, feat_adx_std=11.49866
+  State 3 [chop_high-vol]:  feat_logret=0.00041, feat_vol=0.03547, feat_adx=24.25201  |  feat_logret_std=0.02215, feat_vol_std=0.00825, feat_adx_std=4.41474
+
+Transition matrix (rows = from-state, cols = to-state):
+        S0  S1  S2  S3
+  S0 [    bull_low-vol]:  0.958  0.008  0.002  0.032
+  S1 [    bull_low-vol]:  0.011  0.957  0.011  0.021
+  S2 [   bear_high-vol]:  0.000  0.016  0.957  0.027
+  S3 [   chop_high-vol]:  0.023  0.021  0.009  0.947
+
+Expected state duration (1 / (1 - p_ii)), in bars (days):
+  State 0 [bull_low-vol]: 23.8 days  (self-transition p=0.958)
+  State 1 [bull_low-vol]: 23.3 days  (self-transition p=0.957)
+  State 2 [bear_high-vol]: 23.2 days  (self-transition p=0.957)
+  State 3 [chop_high-vol]: 18.8 days  (self-transition p=0.947)
+
+Stationary distribution (long-run % of time in each state):
+  State 0 [bull_low-vol]: 25.2%
+  State 1 [bull_low-vol]: 26.6%
+  State 2 [bear_high-vol]: 15.0%
+  State 3 [chop_high-vol]: 33.3%
+
+======================================================================
+MODEL REPORT — K=5
+======================================================================
+
+Per-state emission parameters (mean, std) per feature:
+  State 0 [bear_high-vol]:  feat_logret=-0.00568, feat_vol=0.06654, feat_adx=34.95888  |  feat_logret_std=0.03867, feat_vol_std=0.02239, feat_adx_std=11.42613
+  State 1 [flat_low-vol]:  feat_logret=0.00082, feat_vol=0.01808, feat_adx=18.81003  |  feat_logret_std=0.01068, feat_vol_std=0.00699, feat_adx_std=3.96959
+  State 2 [bull_low-vol]:  feat_logret=0.00643, feat_vol=0.03260, feat_adx=48.22740  |  feat_logret_std=0.01885, feat_vol_std=0.01162, feat_adx_std=6.55662
+  State 3 [bull_low-vol]:  feat_logret=0.00232, feat_vol=0.02978, feat_adx=33.27065  |  feat_logret_std=0.01806, feat_vol_std=0.00969, feat_adx_std=3.43955
+  State 4 [chop_high-vol]:  feat_logret=0.00019, feat_vol=0.03549, feat_adx=22.96212  |  feat_logret_std=0.02219, feat_vol_std=0.00875, feat_adx_std=3.66075
+
+Transition matrix (rows = from-state, cols = to-state):
+        S0  S1  S2  S3  S4
+  S0 [   bear_high-vol]:  0.953  0.000  0.017  0.006  0.024
+  S1 [    flat_low-vol]:  0.000  0.958  0.000  0.008  0.035
+  S2 [    bull_low-vol]:  0.013  0.000  0.946  0.041  0.000
+  S3 [    bull_low-vol]:  0.003  0.014  0.029  0.919  0.036
+  S4 [   chop_high-vol]:  0.009  0.024  0.000  0.029  0.937
+
+Expected state duration (1 / (1 - p_ii)), in bars (days):
+  State 0 [bear_high-vol]: 21.2 days  (self-transition p=0.953)
+  State 1 [flat_low-vol]: 23.7 days  (self-transition p=0.958)
+  State 2 [bull_low-vol]: 18.5 days  (self-transition p=0.946)
+  State 3 [bull_low-vol]: 12.3 days  (self-transition p=0.919)
+  State 4 [chop_high-vol]: 15.9 days  (self-transition p=0.937)
+
+Stationary distribution (long-run % of time in each state):
+  State 0 [bear_high-vol]: 11.4%
+  State 1 [flat_low-vol]: 23.6%
+  State 2 [bull_low-vol]: 14.8%
+  State 3 [bull_low-vol]: 21.0%
+  State 4 [chop_high-vol]: 29.3%

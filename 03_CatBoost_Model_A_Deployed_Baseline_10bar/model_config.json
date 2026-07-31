@@ -1,0 +1,125 @@
+{
+  "model_name": "BTC entry classifier \u2014 ACTUAL DEPLOYED model (pre-HMM baseline)",
+  "status": "This is the model confirmed live in production BEFORE any HMM regime work began. Confirmed directly from retrain_from_signals_all_signals.py and model_monitor.py source code, both of which train on `binary_target` (10-bar vertical barrier), never `binary_target_vb5`.",
+  "model_type": "CatBoostClassifier (5 independently seeded fits, averaged at inference)",
+  "target_column": "binary_target",
+  "target_definition": {
+    "method": "triple barrier",
+    "barrier_width_formula": "max(2 * ATR_pct_at_entry, 1.0) percent, symmetric",
+    "vertical_timeout_bars": 10,
+    "direction_convention": "raw Signal column (BUY/SELL), not execution_signal"
+  },
+  "features": {
+    "count": 27,
+    "list": [
+      "Type_encoded",
+      "macd_histogram",
+      "macd_signal",
+      "rvi",
+      "rvi_signal",
+      "rsi_14",
+      "rsi_lag1",
+      "mfi_14",
+      "adx",
+      "plus_di",
+      "minus_di",
+      "di_net",
+      "er_10",
+      "volume",
+      "bar_body_ratio",
+      "adx_regime",
+      "vol_regime",
+      "er_adx_product",
+      "adx_centered",
+      "rsi_centered",
+      "ema21_50_ratio",
+      "ema9_21_ratio",
+      "ema9_dist",
+      "keltner_pos",
+      "log_return_1",
+      "log_return_5",
+      "supertrend_dist",
+      "atr_pct"
+    ],
+    "regime_features_included": false,
+    "note": "No HMM/regime features are part of this model. Regime probabilities were tested extensively as an addition (see analysis history) and did not clear the deployment bar \u2014 this model reflects what's actually live."
+  },
+  "KNOWN_ISSUE_feature_basis_mismatch": {
+    "summary": "4 of the 27 training features (atr_pct, ema9_dist, keltner_pos, supertrend_dist) were computed relative to `corrected_entry_price` (the next bar's open, used to fix a label lookahead bug) in this training data, but the LIVE bot (signal_generator_v3.py + video_features.py) computes these same features relative to the raw signal-candle close at inference time.",
+    "confirmed": "Verified empirically to match the exact magnitude of the entry-price correction itself (median ~0.28% of price level) across all affected columns.",
+    "impact_tested": "Retrained with the feature basis corrected to match live (raw price) and retested on both the frozen historical Test and a genuinely fresh 2026 live holdout \u2014 historical Test AUC was unchanged (0.858 -> 0.848) and fresh-forward AUC was unchanged (0.566 -> 0.557). This is a real bug worth fixing in the codebase but was directly tested and does NOT explain the historical-vs-live AUC gap on its own.",
+    "recommendation": "Fix atr_pct/ema9_dist/keltner_pos/supertrend_dist to use the raw signal-candle close consistently in any future retrain, even though it wasn't the primary driver of the live gap."
+  },
+  "data_splits": {
+    "train": {
+      "n_rows": 3446,
+      "start": "2017-08-21 10:30:00",
+      "end": "2023-04-17 20:30:00"
+    },
+    "validation": {
+      "n_rows": 737,
+      "start": "2023-04-18 03:30:00",
+      "end": "2024-08-23 00:30:00"
+    },
+    "test": {
+      "n_rows": 738,
+      "start": "2024-08-23 14:30:00",
+      "end": "2025-12-07 06:30:00",
+      "note": "permanent frozen holdout, never touched during training"
+    },
+    "split_method": "chronological, no shuffling"
+  },
+  "sample_weighting": {
+    "method": "exponential recency decay",
+    "half_life_days": 180
+  },
+  "class_balancing": "class_weights={0: 1.0, 1: scale_pos}, scale_pos = n_class0/n_class1",
+  "catboost_hyperparameters": {
+    "iterations": 2000,
+    "learning_rate": 0.02,
+    "depth": 5,
+    "l2_leaf_reg": 5,
+    "min_data_in_leaf": 20,
+    "random_strength": 1.5,
+    "bagging_temperature": 0.8,
+    "loss_function": "Logloss",
+    "eval_metric": "AUC",
+    "od_type": "Iter",
+    "od_wait": 150,
+    "random_seed": "one of [42,43,44,45,46], fit independently per seed"
+  },
+  "inference": "predict_proba averaged across the 5 seed models",
+  "results": {
+    "frozen_holdout_test_auc_mean": 0.8575,
+    "frozen_holdout_test_auc_std": 0.0027,
+    "per_seed_auc": {
+      "42": 0.8574,
+      "43": 0.8614,
+      "44": 0.8588,
+      "45": 0.8533,
+      "46": 0.8566
+    },
+    "fresh_forward_auc_on_live_2026_data": 0.566,
+    "fresh_forward_note": "Evaluated on live trades from 2026-05-10 onward, never used in training. Substantially below the historical Test AUC. Extensively investigated (see analysis history / README) \u2014 staleness, labeling window, feature-computation window, train/val boundary effects, and the feature-basis bug above were all tested directly and none explain the full gap."
+  },
+  "probability_thresholds": {
+    "take_bucket_A": ">= 0.65 -- trade the raw signal as-is",
+    "reverse_bucket_E": "<= 0.35 -- trade the opposite of the raw signal",
+    "skip_bucket_S": "0.35 to 0.65 -- no trade"
+  },
+  "model_files": [
+    "models/model_seed42.cbm",
+    "models/model_seed43.cbm",
+    "models/model_seed44.cbm",
+    "models/model_seed45.cbm",
+    "models/model_seed46.cbm"
+  ],
+  "training_data_files": [
+    "training_data/train_split.csv",
+    "training_data/validation_split.csv",
+    "training_data/test_split_frozen_holdout.csv"
+  ],
+  "reproduction_script": "train_catboost_model.py",
+  "reproduction_verified": true,
+  "reproduction_verified_note": "Verified to reproduce 0.8575 +/- 0.0027 exactly in a clean directory before packaging."
+}

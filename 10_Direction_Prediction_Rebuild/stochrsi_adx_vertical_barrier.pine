@@ -1,0 +1,130 @@
+//@version=6
+// ============================================================================
+// StochRSI + ADX Strategy with Vertical Barrier (time-based exit)
+//
+// Same entry logic as optimized_strategy.pine. No take profit, no stop loss.
+// Exits are: opposite signal (as before) OR a vertical barrier -- a maximum
+// number of bars a position is allowed to stay open, after which it is
+// force-closed regardless of price. Barrier length is user-controlled.
+// ============================================================================
+
+strategy("StochRSI+ADX [Vertical Barrier]",
+     overlay                 = true,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     process_orders_on_close = true,
+     calc_on_every_tick      = false,
+     initial_capital         = 100000,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.03)
+
+// ============================================================
+// INPUTS
+// ============================================================
+rsiLength     = input.int(14, "RSI Length")
+stochLength   = input.int(21, "Stochastic Length")
+kLength       = input.int(3,  "Stoch RSI %K Smoothing")
+dLength       = input.int(3,  "Stoch RSI %D Smoothing")
+adxLength     = input.int(21, "ADX Length")
+adxThreshold  = input.int(20, "ADX Threshold")
+
+osThreshold   = input.int(20, "Oversold gate (prev %K <)")
+kThreshold    = input.int(15, "%K gate (< for buy)")
+dThreshold    = input.int(20, "%D gate (< for buy)")
+
+// --- Vertical barrier ---
+maxBarsInTrade = input.int(20, "Vertical Barrier (bars)", minval=1, tooltip="Force-close any open position after this many bars.")
+
+// ============================================================
+// RSI
+// ============================================================
+delta   = ta.change(close)
+gain    = delta > 0 ? delta : 0.0
+loss    = delta < 0 ? -delta : 0.0
+avgGain = ta.rma(gain, rsiLength)
+avgLoss = ta.rma(loss, rsiLength)
+rs      = avgLoss == 0 ? 100.0 : avgGain / avgLoss
+rsi     = 100.0 - (100.0 / (1.0 + rs))
+
+// ============================================================
+// STOCHASTIC RSI
+// ============================================================
+rsiLow   = ta.lowest(rsi,  stochLength)
+rsiHigh  = ta.highest(rsi, stochLength)
+rsiRange = rsiHigh - rsiLow
+stochRSI = rsiRange == 0.0 ? 0.0 : (rsi - rsiLow) / rsiRange * 100.0
+k        = ta.sma(stochRSI, kLength)
+d        = ta.sma(k, dLength)
+
+// ============================================================
+// ADX
+// ============================================================
+upMove   = high - high[1]
+downMove = low[1] - low
+plusDM   = (upMove > downMove and upMove > 0) ? upMove : 0.0
+minusDM  = (downMove > upMove and downMove > 0) ? downMove : 0.0
+tr = na(close[1]) ? (high - low) : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+atr         = ta.rma(tr,      adxLength)
+plusDI_raw  = ta.rma(plusDM,  adxLength)
+minusDI_raw = ta.rma(minusDM, adxLength)
+plusDI      = atr == 0.0 ? 0.0 : 100.0 * (plusDI_raw  / atr)
+minusDI     = atr == 0.0 ? 0.0 : 100.0 * (minusDI_raw / atr)
+diSum       = plusDI + minusDI
+diDiff      = math.abs(plusDI - minusDI)
+dx          = diSum == 0.0 ? 0.0 : 100.0 * (diDiff / diSum)
+adx         = ta.rma(dx, adxLength)
+
+// ============================================================
+// SIGNALS
+// ============================================================
+prevK       = k[1]
+kCrossOverD = ta.crossover(k, d)
+dCrossOverK = ta.crossover(d, k)
+
+buyConditions  = kCrossOverD and prevK < osThreshold and k < kThreshold and d < dThreshold and adx > adxThreshold
+sellConditions = dCrossOverK and prevK > (100 - osThreshold) and k > (100 - kThreshold) and d > (100 - dThreshold) and adx > adxThreshold
+
+// ============================================================
+// VERTICAL BARRIER TRACKING
+// ============================================================
+var int barsInTrade = 0
+
+if strategy.position_size != 0
+    barsInTrade := barsInTrade + 1
+else
+    barsInTrade := 0
+
+verticalBarrierHit = strategy.position_size != 0 and barsInTrade >= maxBarsInTrade
+
+// ============================================================
+// ENTRIES
+// ============================================================
+if buyConditions
+    strategy.entry("BUY", strategy.long)
+
+if sellConditions
+    strategy.entry("SELL", strategy.short)
+
+// ============================================================
+// EXITS — LONG
+// ============================================================
+if strategy.position_size > 0
+    if sellConditions
+        strategy.close("BUY", comment="Opposite Signal")
+    else if verticalBarrierHit
+        strategy.close("BUY", comment="Vertical Barrier")
+
+// ============================================================
+// EXITS — SHORT
+// ============================================================
+if strategy.position_size < 0
+    if buyConditions
+        strategy.close("SELL", comment="Opposite Signal")
+    else if verticalBarrierHit
+        strategy.close("SELL", comment="Vertical Barrier")
+
+// ============================================================
+// PLOTS
+// ============================================================
+plotshape(buyConditions,  title="Buy Signal",  location=location.belowbar, style=shape.labelup,   color=color.green, text="BUY",  size=size.small)
+plotshape(sellConditions, title="Sell Signal", location=location.abovebar, style=shape.labeldown, color=color.red,   text="SELL", size=size.small)

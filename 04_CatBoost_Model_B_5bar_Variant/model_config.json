@@ -1,0 +1,119 @@
+{
+  "model_name": "BTC entry classifier \u2014 5-bar vertical barrier variant",
+  "model_type": "CatBoostClassifier (5 independently seeded fits, averaged at inference)",
+  "target_column": "binary_target_vb5",
+  "target_definition": {
+    "method": "triple barrier",
+    "barrier_width_formula": "max(2 * ATR_pct_at_entry, 1.0) percent, symmetric",
+    "vertical_timeout_bars": 5,
+    "direction_convention": "raw Signal column (BUY/SELL), NOT execution_signal -- label reflects the technical pattern's true outcome, independent of any ML bucket decision made about it",
+    "outcome_labels": {
+      "upper": "favorable barrier hit first -> label=1 (WIN)",
+      "lower": "stop-loss barrier hit first -> label=0 (LOSS)",
+      "vertical": "neither barrier hit within 5 bars -> label = 1 if forward return at bar 5 is positive (direction-adjusted), else 0"
+    }
+  },
+  "features": {
+    "count": 27,
+    "list": [
+      "Type_encoded",
+      "macd_histogram",
+      "macd_signal",
+      "rvi",
+      "rvi_signal",
+      "rsi_14",
+      "rsi_lag1",
+      "mfi_14",
+      "adx",
+      "plus_di",
+      "minus_di",
+      "di_net",
+      "er_10",
+      "volume",
+      "bar_body_ratio",
+      "adx_regime",
+      "vol_regime",
+      "er_adx_product",
+      "adx_centered",
+      "rsi_centered",
+      "ema21_50_ratio",
+      "ema9_21_ratio",
+      "ema9_dist",
+      "keltner_pos",
+      "log_return_1",
+      "log_return_5",
+      "supertrend_dist",
+      "atr_pct"
+    ],
+    "feature_source_code": "signal_generator_v3.py (calculate_indicators, build_ml_features) + video_features.py (7 EMA/Keltner/Supertrend/log-return features)"
+  },
+  "data_splits": {
+    "train": {
+      "n_rows": 3446,
+      "start": "2017-08-21 10:30:00",
+      "end": "2023-04-17 20:30:00"
+    },
+    "validation": {
+      "n_rows": 737,
+      "start": "2023-04-18 03:30:00",
+      "end": "2024-08-23 00:30:00",
+      "note": "used for early stopping (use_best_model=True), never used to fit weights"
+    },
+    "test": {
+      "n_rows": 738,
+      "start": "2024-08-23 14:30:00",
+      "end": "2025-12-07 06:30:00",
+      "note": "permanent frozen holdout, never touched during training or model selection"
+    },
+    "split_method": "chronological, no shuffling, boundaries fixed from the original historical split"
+  },
+  "sample_weighting": {
+    "method": "exponential recency decay",
+    "half_life_days": 180,
+    "normalization": "weights divided by their own mean, so mean weight = 1.0"
+  },
+  "class_balancing": "class_weights={0: 1.0, 1: scale_pos}, where scale_pos = n_class0 / n_class1, recomputed from the training labels at fit time",
+  "catboost_hyperparameters": {
+    "iterations": 2000,
+    "learning_rate": 0.02,
+    "depth": 5,
+    "l2_leaf_reg": 5,
+    "min_data_in_leaf": 20,
+    "random_strength": 1.5,
+    "bagging_temperature": 0.8,
+    "loss_function": "Logloss",
+    "eval_metric": "AUC",
+    "od_type": "Iter",
+    "od_wait": 150,
+    "random_seed": "one of [42, 43, 44, 45, 46], fit independently per seed"
+  },
+  "inference": "predict_proba averaged across the 5 seed models for the final probability",
+  "results": {
+    "frozen_holdout_test_auc_mean": 0.9128,
+    "frozen_holdout_test_auc_std": 0.0015,
+    "per_seed_auc": {
+      "42": 0.9142,
+      "43": 0.9129,
+      "44": 0.9142,
+      "45": 0.91,
+      "46": 0.9129
+    },
+    "fresh_forward_auc_on_live_2026_data": 0.4944,
+    "fresh_forward_note": "evaluated on 79 live trades (2026-05-10 -> 2026-07-20), never used in training. This is markedly worse than the historical Test AUC -- see METHODOLOGY.md and the accompanying analysis notes for the full investigation into why (staleness, labeling, and feature-window mismatches were all tested and ruled out as the explanation)."
+  },
+  "model_files": [
+    "models/model_seed42.cbm",
+    "models/model_seed44.cbm",
+    "models/model_seed43.cbm",
+    "models/model_seed45.cbm",
+    "models/model_seed46.cbm"
+  ],
+  "training_data_files": [
+    "training_data/train_split.csv",
+    "training_data/validation_split.csv",
+    "training_data/test_split_frozen_holdout.csv"
+  ],
+  "reproduction_script": "train_catboost_model.py",
+  "reproduction_verified": true,
+  "reproduction_verified_note": "Running train_catboost_model.py against the provided training_data/ CSVs reproduces the reported AUC (0.9128 +/- 0.0015) exactly, confirmed in a clean directory before packaging."
+}

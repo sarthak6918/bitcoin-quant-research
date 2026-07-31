@@ -1,0 +1,193 @@
+//@version=6
+// ============================================================================
+// MAXIMUM WIN-RATE PARAMETERIZATION @ ~0.5 trades/day
+//
+// Found by exhaustively searching 129,600 configurations of the original
+// strategy's inputs on 2017-08 -> 2024-12, then validating ONCE on the
+// untouched 2025-01 -> 2026-07 period.
+//
+//   Win rate: 74.3% (search)  ->  72.0% (validation, out of sample)
+//   Frequency: 0.50/day (search) -> 0.43/day (validation)
+//
+// The win rate is REAL and it GENERALIZES (rank correlation between search
+// and validation win rate across 28,701 configs was rho = +0.87).
+//
+// ############################################################################
+// #  READ THIS BEFORE USING: THIS CONFIGURATION LOSES MONEY.                 #
+// #                                                                          #
+// #  Profit factor 0.92 (search) / 0.85 (validation). Total PnL negative in  #
+// #  BOTH periods. It achieves a 72% win rate the trivial way: a 1% take-    #
+// #  profit with NO STOP LOSS. It banks many tiny 1% wins and holds losers   #
+// #  until the opposite signal fires, whenever that is. Tail risk is         #
+// #  UNBOUNDED -- a single adverse move can exceed all accumulated gains.    #
+// #                                                                          #
+// #  High win rate here is an artifact of exit geometry, NOT of predictive   #
+// #  edge. See FINAL_FINDINGS.md for the full evidence.                      #
+// #                                                                          #
+// #  This file is provided because the win-rate optimization was the         #
+// #  requested deliverable, and to let you reproduce the backtest. It is     #
+// #  NOT a recommendation to trade it.                                       #
+// ############################################################################
+// ============================================================================
+
+strategy("StochRSI+ADX [Max Win-Rate @0.5/day]",
+     overlay                 = true,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     process_orders_on_close = true,
+     calc_on_every_tick      = false,
+     initial_capital         = 100000,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.03)
+
+// ============================================================
+// INPUTS — defaults are the optimized max-win-rate values
+// ============================================================
+rsiLength     = input.int(14, "RSI Length")              // was 14
+stochLength   = input.int(21, "Stochastic Length")       // was 14  <- changed
+kLength       = input.int(3,  "Stoch RSI %K Smoothing")
+dLength       = input.int(3,  "Stoch RSI %D Smoothing")
+adxLength     = input.int(21, "ADX Length")              // was 14  <- changed
+adxThreshold  = input.int(20, "ADX Threshold")           // was 20
+
+osThreshold   = input.int(20, "Oversold gate (prev %K <)")   // was 20
+kThreshold    = input.int(15, "%K gate (< for buy)")         // was 30  <- changed
+dThreshold    = input.int(20, "%D gate (< for buy)")         // was 20
+
+useFixedSL    = input.bool(false, "Use Fixed Stop Loss")     // was true <- DISABLED
+fixedStopLossPct = input.float(3.0, "Fixed Stop Loss %", minval=0.1, step=0.1)
+useTrailing   = input.bool(false, "Use Trailing Stop")       // was true <- DISABLED
+trailingSlPct = input.float(1.0, "Trailing SL %", minval=0.1, step=0.1)
+gainThresholdPct = input.float(1.0, "Gain Threshold for Trailing %", minval=0.1, step=0.1)
+useTakeProfit = input.bool(true,  "Use Take Profit")         // <- ADDED
+takeProfitPct = input.float(1.0,  "Take Profit %", minval=0.1, step=0.1)
+
+// ============================================================
+// RSI
+// ============================================================
+delta   = ta.change(close)
+gain    = delta > 0 ? delta : 0.0
+loss    = delta < 0 ? -delta : 0.0
+avgGain = ta.rma(gain, rsiLength)
+avgLoss = ta.rma(loss, rsiLength)
+rs      = avgLoss == 0 ? 100.0 : avgGain / avgLoss
+rsi     = 100.0 - (100.0 / (1.0 + rs))
+
+// ============================================================
+// STOCHASTIC RSI
+// ============================================================
+rsiLow   = ta.lowest(rsi,  stochLength)
+rsiHigh  = ta.highest(rsi, stochLength)
+rsiRange = rsiHigh - rsiLow
+stochRSI = rsiRange == 0.0 ? 0.0 : (rsi - rsiLow) / rsiRange * 100.0
+k        = ta.sma(stochRSI, kLength)
+d        = ta.sma(k, dLength)
+
+// ============================================================
+// ADX
+// ============================================================
+upMove   = high - high[1]
+downMove = low[1] - low
+plusDM   = (upMove > downMove and upMove > 0) ? upMove : 0.0
+minusDM  = (downMove > upMove and downMove > 0) ? downMove : 0.0
+tr = na(close[1]) ? (high - low) : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+atr         = ta.rma(tr,      adxLength)
+plusDI_raw  = ta.rma(plusDM,  adxLength)
+minusDI_raw = ta.rma(minusDM, adxLength)
+plusDI      = atr == 0.0 ? 0.0 : 100.0 * (plusDI_raw  / atr)
+minusDI     = atr == 0.0 ? 0.0 : 100.0 * (minusDI_raw / atr)
+diSum       = plusDI + minusDI
+diDiff      = math.abs(plusDI - minusDI)
+dx          = diSum == 0.0 ? 0.0 : 100.0 * (diDiff / diSum)
+adx         = ta.rma(dx, adxLength)
+
+// ============================================================
+// SIGNALS
+// ============================================================
+prevK       = k[1]
+kCrossOverD = ta.crossover(k, d)
+dCrossOverK = ta.crossover(d, k)
+
+buyConditions  = kCrossOverD and prevK < osThreshold and k < kThreshold and d < dThreshold and adx > adxThreshold
+sellConditions = dCrossOverK and prevK > (100 - osThreshold) and k > (100 - kThreshold) and d > (100 - dThreshold) and adx > adxThreshold
+
+// ============================================================
+// POSITION TRACKING
+// ============================================================
+var float buyEntryPrice      = na
+var float sellEntryPrice     = na
+var float buyPeak            = na
+var float sellTrough         = na
+var bool  buyTrailingActive  = false
+var bool  sellTrailingActive = false
+
+if buyConditions and strategy.position_size == 0
+    buyEntryPrice     := close
+    buyPeak           := close
+    buyTrailingActive := false
+
+if sellConditions and strategy.position_size == 0
+    sellEntryPrice     := close
+    sellTrough         := close
+    sellTrailingActive := false
+
+if strategy.position_size > 0
+    buyPeak := math.max(nz(buyPeak, high), high)
+    if not buyTrailingActive and high >= buyEntryPrice * (1.0 + gainThresholdPct / 100.0)
+        buyTrailingActive := true
+
+if strategy.position_size < 0
+    sellTrough := math.min(nz(sellTrough, low), low)
+    if not sellTrailingActive and low <= sellEntryPrice * (1.0 - gainThresholdPct / 100.0)
+        sellTrailingActive := true
+
+// ============================================================
+// STOP / TARGET LEVELS
+// ============================================================
+longFixedSL  = na(buyEntryPrice)  ? na : buyEntryPrice  * (1.0 - fixedStopLossPct / 100.0)
+longTrailSL  = na(buyPeak)        ? na : buyPeak        * (1.0 - trailingSlPct    / 100.0)
+longTP       = na(buyEntryPrice)  ? na : buyEntryPrice  * (1.0 + takeProfitPct    / 100.0)
+shortFixedSL = na(sellEntryPrice) ? na : sellEntryPrice * (1.0 + fixedStopLossPct / 100.0)
+shortTrailSL = na(sellTrough)     ? na : sellTrough     * (1.0 + trailingSlPct    / 100.0)
+shortTP      = na(sellEntryPrice) ? na : sellEntryPrice * (1.0 - takeProfitPct    / 100.0)
+
+// ============================================================
+// ENTRIES
+// ============================================================
+if buyConditions
+    strategy.entry("BUY", strategy.long)
+
+if sellConditions
+    strategy.entry("SELL", strategy.short)
+
+// ============================================================
+// EXITS — LONG  (all stops CLOSE-based, matching the tested simulation)
+// ============================================================
+if strategy.position_size > 0
+    if sellConditions
+        strategy.close("BUY", comment="Opposite Signal")
+    else if useFixedSL and not na(longFixedSL) and close <= longFixedSL
+        strategy.close("BUY", comment="Fixed SL")
+    else if useTakeProfit and not na(longTP) and close >= longTP
+        strategy.close("BUY", comment="Take Profit")
+    else if useTrailing and buyTrailingActive and not na(longTrailSL) and close <= longTrailSL
+        strategy.close("BUY", comment="Trailing SL")
+
+// ============================================================
+// EXITS — SHORT
+// ============================================================
+if strategy.position_size < 0
+    if buyConditions
+        strategy.close("SELL", comment="Opposite Signal")
+    else if useFixedSL and not na(shortFixedSL) and close >= shortFixedSL
+        strategy.close("SELL", comment="Fixed SL")
+    else if useTakeProfit and not na(shortTP) and close <= shortTP
+        strategy.close("SELL", comment="Take Profit")
+    else if useTrailing and sellTrailingActive and not na(shortTrailSL) and close >= shortTrailSL
+        strategy.close("SELL", comment="Trailing SL")
+
+// ============================================================
+// PLOTS
+// ============================================================
+plotshape(buyConditions,  title="Buy Signal",  location=location.belowbar, style=shape.labelup,   color=color.green, text="BUY",  size=size.small)
+plotshape(sellConditions, title="Sell Signal", location=location.abovebar, style=shape.labeldown, color=color.red,   text="SELL", size=size.small)

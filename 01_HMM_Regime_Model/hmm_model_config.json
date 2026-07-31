@@ -1,0 +1,134 @@
+{
+  "model_name": "BTC/USDT market regime detector \u2014 Gaussian Hidden Markov Model",
+  "model_class": "hmmlearn.hmm.GaussianHMM",
+  "chosen_k_states": 5,
+  "selection_method": "Fit K=2..5 (then K=2..7 in an extended check), each with 20 random EM restarts. Selected by lowest BIC among restarts that pass a health check (rejects degenerate fits: non-finite parameters, invalid transition-matrix rows, or any state occupying <1% of frames). Cross-checked against state economic interpretability (persistence, distinctness) before locking in.",
+  "features": {
+    "list": [
+      "feat_logret",
+      "feat_vol",
+      "feat_adx"
+    ],
+    "definitions": {
+      "feat_logret": "3-day rolling mean of 1-day log return (close-to-close), on daily bars",
+      "feat_vol": "14-day rolling std of 1-day log returns, on daily bars",
+      "feat_adx": "14-period ADX computed on daily bars (via the `ta` library), a directionless trend-strength measure"
+    },
+    "why_these_three": "Return+vol alone (the classic 2-feature regime setup) could not separate 'chop' from 'calm trending' -- both look identical on those two dimensions. ADX was tested against an autocorrelation-based alternative and won: ADX cleanly separated trend strength (tight per-state std relative to inter-state gaps) while autocorrelation only added noise and shortened state persistence."
+  },
+  "covariance_type": "diag",
+  "window_parameters": {
+    "ret_smooth_days": 3,
+    "vol_window_days": 14,
+    "adx_window_days": 14
+  },
+  "data": {
+    "source": "Binance public REST API, BTC/USDT daily spot OHLCV",
+    "coverage": "2017-08-17 -> 2026-07-22 (3,262 raw daily bars, 3,248 after feature warmup)",
+    "train_test_split": "chronological 80/20, no shuffling",
+    "train_range": "2017-08-31 -> 2024-10-10 (2,598 rows)",
+    "test_range": "2024-10-11 -> 2026-07-22 (650 rows)"
+  },
+  "decoding_method": {
+    "live_safe_method": "filtered (causal forward algorithm, hand-implemented) -- uses only data up to and including time t, no future information",
+    "historical_only_method": "smoothed (forward-backward, hmmlearn predict_proba) -- uses the WHOLE sequence including future bars; valid ONLY for historical interpretation, NEVER for live signals (this would be lookahead bias, the HMM-equivalent of the entry-price/next-bar-ATR bugs already fixed elsewhere in this codebase)",
+    "agreement_rate": "~98% on synthetic validation data; disagreements cluster at regime-change boundaries, exactly where the distinction matters most"
+  },
+  "state_definitions": {
+    "0": {
+      "label": "bear_high-vol",
+      "mean_return_pct_per_day": -0.5678,
+      "mean_realized_vol_pct_per_day": 6.6545,
+      "mean_adx": 34.96,
+      "self_transition_prob": 0.9528,
+      "expected_duration_days": 21.2
+    },
+    "1": {
+      "label": "flat_low-vol",
+      "mean_return_pct_per_day": 0.0816,
+      "mean_realized_vol_pct_per_day": 1.8076,
+      "mean_adx": 18.81,
+      "self_transition_prob": 0.9577,
+      "expected_duration_days": 23.7
+    },
+    "2": {
+      "label": "bull_low-vol",
+      "mean_return_pct_per_day": 0.643,
+      "mean_realized_vol_pct_per_day": 3.2596,
+      "mean_adx": 48.23,
+      "self_transition_prob": 0.9461,
+      "expected_duration_days": 18.5
+    },
+    "3": {
+      "label": "bull_low-vol",
+      "mean_return_pct_per_day": 0.2319,
+      "mean_realized_vol_pct_per_day": 2.9784,
+      "mean_adx": 33.27,
+      "self_transition_prob": 0.9189,
+      "expected_duration_days": 12.3
+    },
+    "4": {
+      "label": "chop_high-vol",
+      "mean_return_pct_per_day": 0.0192,
+      "mean_realized_vol_pct_per_day": 3.5487,
+      "mean_adx": 22.96,
+      "self_transition_prob": 0.9372,
+      "expected_duration_days": 15.9
+    }
+  },
+  "transition_matrix": [
+    [
+      0.9528,
+      0.0,
+      0.0173,
+      0.0055,
+      0.0244
+    ],
+    [
+      0.0,
+      0.9577,
+      0.0,
+      0.0077,
+      0.0346
+    ],
+    [
+      0.0134,
+      0.0,
+      0.9461,
+      0.0405,
+      0.0
+    ],
+    [
+      0.0031,
+      0.0137,
+      0.0287,
+      0.9189,
+      0.0357
+    ],
+    [
+      0.0093,
+      0.0243,
+      0.0,
+      0.0292,
+      0.9372
+    ]
+  ],
+  "transition_matrix_order": [
+    "bear_high-vol (state 0)",
+    "flat_low-vol (state 1)",
+    "bull_low-vol (state 2)",
+    "bull_low-vol (state 3)",
+    "chop_high-vol (state 4)"
+  ],
+  "deployment": {
+    "mapping_to_1h": "daily regime forward-filled onto hourly bars with a 1-DAY LAG: a day's regime is only 'available' starting the following day 00:00, since it isn't known until that daily bar has actually closed -- no lookahead",
+    "mapping_script": "fetch_1h_and_map_regime.py (not included in this package -- ask if needed; the already-mapped output is included as decoded_daily_regime_states.csv plus the daily OHLCV here for full reproducibility of the fit itself)"
+  },
+  "files": {
+    "training_script": "btc_regime_hmm.py",
+    "trained_model": "btc_regime_model_K5.pkl",
+    "training_data_daily_ohlcv": "btc_daily_ohlcv_reconstructed.csv (resampled from the continuous 1H series to daily bars -- 3,262 rows, matches the original fetch exactly)",
+    "decoded_output": "decoded_daily_regime_states.csv (per-day features + filtered/smoothed state assignments and probabilities)"
+  },
+  "reproduction_command": "python btc_regime_hmm.py --start_date 2017-08-17 --k_min 2 --k_max 5 --n_restarts 20 --features logret,vol,adx --select_k 5"
+}

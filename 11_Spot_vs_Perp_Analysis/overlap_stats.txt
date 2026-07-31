@@ -1,0 +1,5 @@
+overlap_start=2019-09-08 00:00:00
+n=2517
+corr_returns=0.9998211181692755
+mean_abs_basis_pct=0.04870620403486937
+max_abs_basis_pct=1.795213548817059

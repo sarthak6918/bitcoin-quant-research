@@ -1,0 +1,152 @@
+//@version=6
+strategy("Gold MCX GOLD1! [Final]",
+     overlay                 = true,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     process_orders_on_close = true,
+     calc_on_every_tick      = false,
+     currency                = currency.INR,
+     initial_capital         = 200000000,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.03)
+
+// ============================================================
+// INPUTS
+// ============================================================
+rsiLength        = input.int(14,   "RSI Length")
+stochLength      = input.int(14,   "Stochastic Length")
+kLength          = input.int(3,    "Stoch RSI %K Smoothing")
+dLength          = input.int(3,    "Stoch RSI %D Smoothing")
+adxLength        = input.int(14,   "ADX Length")
+adxThreshold     = input.int(20,   "ADX Threshold")
+fixedStopLossPct = input.float(3.0, "Fixed Stop Loss %",             minval=0.1, step=0.1)
+trailingSlPct    = input.float(1.0, "Trailing SL %",                 minval=0.1, step=0.1)
+gainThresholdPct = input.float(2.0, "Gain Threshold for Trailing %", minval=0.1, step=0.1)
+
+// ============================================================
+// RSI
+// ============================================================
+delta   = ta.change(close)
+gain    = delta > 0 ? delta : 0.0
+loss    = delta < 0 ? -delta : 0.0
+avgGain = ta.rma(gain, rsiLength)
+avgLoss = ta.rma(loss, rsiLength)
+rs      = avgLoss == 0 ? 100.0 : avgGain / avgLoss
+rsi     = 100.0 - (100.0 / (1.0 + rs))
+
+// ============================================================
+// STOCHASTIC RSI
+// ============================================================
+rsiLow   = ta.lowest(rsi,  stochLength)
+rsiHigh  = ta.highest(rsi, stochLength)
+rsiRange = rsiHigh - rsiLow
+stochRSI = rsiRange == 0.0 ? 0.0 : (rsi - rsiLow) / rsiRange * 100.0
+k        = ta.sma(stochRSI, kLength)
+d        = ta.sma(k, dLength)
+
+// ============================================================
+// ADX
+// ============================================================
+upMove   = high - high[1]
+downMove = low[1] - low
+plusDM   = (upMove > downMove and upMove > 0) ? upMove : 0.0
+minusDM  = (downMove > upMove and downMove > 0) ? downMove : 0.0
+
+isNewSession = na(close[1])
+tr = isNewSession ? (high - low) : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+
+atr         = ta.rma(tr,      adxLength)
+plusDI_raw  = ta.rma(plusDM,  adxLength)
+minusDI_raw = ta.rma(minusDM, adxLength)
+plusDI      = atr == 0.0 ? 0.0 : 100.0 * (plusDI_raw  / atr)
+minusDI     = atr == 0.0 ? 0.0 : 100.0 * (minusDI_raw / atr)
+diSum       = plusDI + minusDI
+diDiff      = math.abs(plusDI - minusDI)
+dx          = diSum == 0.0 ? 0.0 : 100.0 * (diDiff / diSum)
+adx         = ta.rma(dx, adxLength)
+
+// ============================================================
+// SIGNALS
+// ============================================================
+prevK       = k[1]
+kCrossOverD = ta.crossover(k, d)
+dCrossOverK = ta.crossover(d, k)
+
+buyConditions = kCrossOverD and prevK < 20 and k < 30 and d < 20 and adx > adxThreshold
+
+sellConditions = dCrossOverK and prevK > 80 and k > 70 and d > 80 and adx > adxThreshold
+
+// ============================================================
+// POSITION TRACKING
+// ============================================================
+var float buyEntryPrice      = na
+var float sellEntryPrice     = na
+var float buyPeak            = na
+var float sellTrough         = na
+var bool  buyTrailingActive  = false
+var bool  sellTrailingActive = false
+
+if buyConditions and strategy.position_size == 0
+    buyEntryPrice     := close
+    buyPeak           := close
+    buyTrailingActive := false
+
+if sellConditions and strategy.position_size == 0
+    sellEntryPrice     := close
+    sellTrough         := close
+    sellTrailingActive := false
+
+if strategy.position_size > 0
+    buyPeak := math.max(nz(buyPeak, high), high)
+    if not buyTrailingActive and high >= buyEntryPrice * (1.0 + gainThresholdPct / 100.0)
+        buyTrailingActive := true
+
+if strategy.position_size < 0
+    sellTrough := math.min(nz(sellTrough, low), low)
+    if not sellTrailingActive and low <= sellEntryPrice * (1.0 - gainThresholdPct / 100.0)
+        sellTrailingActive := true
+
+// ============================================================
+// STOP LEVELS
+// ============================================================
+longFixedSL  = na(buyEntryPrice)  ? na : buyEntryPrice  * (1.0 - fixedStopLossPct / 100.0)
+longTrailSL  = na(buyPeak)        ? na : buyPeak         * (1.0 - trailingSlPct    / 100.0)
+shortFixedSL = na(sellEntryPrice) ? na : sellEntryPrice  * (1.0 + fixedStopLossPct / 100.0)
+shortTrailSL = na(sellTrough)     ? na : sellTrough      * (1.0 + trailingSlPct    / 100.0)
+
+// ============================================================
+// ENTRIES
+// ============================================================
+if buyConditions
+    strategy.entry("BUY", strategy.long)
+
+if sellConditions
+    strategy.entry("SELL", strategy.short)
+
+// ============================================================
+// EXITS — LONG
+// ============================================================
+if strategy.position_size > 0
+    if sellConditions
+        strategy.close("BUY", comment="Opposite Signal")
+    else if not na(longFixedSL) and close <= longFixedSL
+        strategy.close("BUY", comment="Fixed SL")
+    else if buyTrailingActive and not na(longTrailSL) and close <= longTrailSL
+        strategy.close("BUY", comment="Trailing SL")
+
+// ============================================================
+// EXITS — SHORT
+// ============================================================
+if strategy.position_size < 0
+    if buyConditions
+        strategy.close("SELL", comment="Opposite Signal")
+    else if not na(shortFixedSL) and close >= shortFixedSL
+        strategy.close("SELL", comment="Fixed SL")
+    else if sellTrailingActive and not na(shortTrailSL) and close >= shortTrailSL
+        strategy.close("SELL", comment="Trailing SL")
+
+// ============================================================
+// PLOTS
+// ============================================================
+plotshape(buyConditions,  title="Buy Signal",  location=location.belowbar, style=shape.labelup,   color=color.green, text="BUY",  size=size.small)
+plotshape(sellConditions, title="Sell Signal", location=location.abovebar, style=shape.labeldown, color=color.red,   text="SELL", size=size.small)
